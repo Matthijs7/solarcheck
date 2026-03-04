@@ -3,17 +3,16 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SolarWatson — Zonhub Prestatie Check</title>
+  <title>Solar Check — Zonhub Prestatie Check</title>
   <meta name="description" content="Bereken de Performance Ratio van je zonnepanelen met officiële KNMI-stralingsgegevens."/>
-  <!-- React + Babel via CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #f0f2f5; }
     #root { height: 100%; }
-    /* Allow iframe to resize to content */
     body { overflow-x: hidden; }
   </style>
 </head>
@@ -27,31 +26,35 @@
 
 function getPeriodDates(periodChoice) {
   const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
-  if (periodChoice === "a") {
+  const y = now.getFullYear(), m = now.getMonth();
+  // Data is uploaded monthly — treat end of last full month as the safe cutoff
+  const cutoff = new Date(y, m, 0); // last day of previous month
+  const cy = cutoff.getFullYear(), cm = cutoff.getMonth(); // cm is 0-based
+
+  const fmt = (yr, mo, day) => `${yr}${String(mo+1).padStart(2,'0')}${String(day).padStart(2,'0')}`;
+  const monthName = (yr, mo) => new Date(yr, mo, 1).toLocaleString('nl-NL', {month:'long'});
+  const lastDayOf = (yr, mo) => new Date(yr, mo+1, 0).getDate();
+
+  if (periodChoice === "b") {
+    // Previous full month = most recent complete month in data
     return {
-      start: `${y}${String(m+1).padStart(2,'0')}01`,
-      end:   `${y}${String(m+1).padStart(2,'0')}${String(d).padStart(2,'0')}`,
-      label: `${now.toLocaleString('nl-NL',{month:'long'})} ${y} (t/m vandaag)`
+      start: fmt(cy, cm, 1),
+      end:   fmt(cy, cm, lastDayOf(cy, cm)),
+      label: `${monthName(cy, cm)} ${cy}`
     };
-  } else if (periodChoice === "b") {
-    const pm = m === 0 ? 11 : m-1, py = m === 0 ? y-1 : y;
-    const lastDay = new Date(y, m, 0).getDate();
-    return {
-      start: `${py}${String(pm+1).padStart(2,'0')}01`,
-      end:   `${py}${String(pm+1).padStart(2,'0')}${String(lastDay).padStart(2,'0')}`,
-      label: `${new Date(py,pm,1).toLocaleString('nl-NL',{month:'long'})} ${py} (volledig)`
-    };
-  } else if (periodChoice === "c") {
-    return {
-      start: `${y}0101`,
-      end:   `${y}${String(m+1).padStart(2,'0')}${String(d).padStart(2,'0')}`,
-      label: `${y} (1 jan t/m vandaag)`
-    };
-  } else {
-    const py = y-1;
-    return { start:`${py}0101`, end:`${py}1231`, label:`${py} (volledig jaar)` };
   }
+
+  if (periodChoice === "c") {
+    // This year up to end of last full month
+    return {
+      start: fmt(cy, 0, 1),
+      end:   fmt(cy, cm, lastDayOf(cy, cm)),
+      label: `${cy} (t/m ${monthName(cy, cm)})`
+    };
+  }
+  // "d" = previous full year
+  const py = cy - 1;
+  return { start:`${py}0101`, end:`${py}1231`, label:`${py} (volledig jaar)` };
 }
 
 // ── Orientation yield factors (relative to South = 1.00) ─────────────────────
@@ -200,15 +203,15 @@ function sumRadiation(stationId, startStr, endStr) {
 
 // ── Rating helper ─────────────────────────────────────────────────────────────
 function getRating(pr) {
-  if (pr < 75)  return {rating:"Niet okay",      ratingIcon:"⚠️", ratingColor:"#e53935"};
-  if (pr < 80)  return {rating:"Okay",           ratingIcon:"🔆", ratingColor:"#fb8c00"};
+  if (pr < 75)  return {rating:"Niet oké",      ratingIcon:"⚠️", ratingColor:"#e53935"};
+  if (pr < 80)  return {rating:"Oké",           ratingIcon:"🔆", ratingColor:"#fb8c00"};
   if (pr < 90)  return {rating:"Goed",           ratingIcon:"✅", ratingColor:"#43a047"};
   if (pr <= 95) return {rating:"Zeer goed",      ratingIcon:"🌟", ratingColor:"#00897b"};
   return         {rating:"Controleer gegevens",  ratingIcon:"🔍", ratingColor:"#8e24aa"};
 }
 
 function getAdvice(pr, orientLabel, tiltDeg, systemAge) {
-  // Expected degradation: ~0.6% per year (industry average mono/poly)
+  // Expected degradation: ~0.5% per year (industry average mono/poly)
   const degradation = Math.min(systemAge * 0.6, 20); // cap at 20%
   const ageCorrectedRef = 80 * (1 - degradation / 100); // expected PR after degradation
   const ageNote = systemAge > 0
@@ -236,7 +239,7 @@ function getAdvice(pr, orientLabel, tiltDeg, systemAge) {
 }
 
 // ── Main analysis function (fully local, no API calls needed for data) ─────────
-async function analyzeLocal(place, kwp, periodChoice, kwhProduced, orientation, tilt, systemAge) {
+async function analyzeLocal(place, kwp, periodChoice, kwhProduced, orientation, tilt, systemAge, sys2) {
   const period = getPeriodDates(periodChoice);
   const orientInfo = ORIENTATION_FACTORS[orientation] || ORIENTATION_FACTORS["Z"];
   const tiltDeg = parseInt(tilt) || 35;
@@ -273,8 +276,57 @@ async function analyzeLocal(place, kwp, periodChoice, kwhProduced, orientation, 
       fallbackStation.available, {...fallbackStation.s, name: fallbackStation.s.name + " (dichtstbijzijnde met data)"}, distanceKm, period, systemAge);
   }
 
-  return buildResult(place, kwp, kwhProduced, orientation, tiltDeg, orientInfo, tiltFactor,
+  // Build system 1 result
+  const result1 = buildResult(place, kwp, kwhProduced, orientation, tiltDeg, orientInfo, tiltFactor,
     {totalQ, count}, station, distanceKm, period, systemAge);
+
+  // If no second system, return as-is
+  if (!sys2) return result1;
+
+  // Build system 2 theoretical result (same station/period)
+  const orientInfo2 = ORIENTATION_FACTORS[sys2.orientation] || ORIENTATION_FACTORS["Z"];
+  const tiltDeg2 = parseInt(sys2.tilt) || 35;
+  const tiltFactor2 = getTiltFactor(sys2.orientation, tiltDeg2);
+  const irradTilted2 = (totalQ / 360) * tiltFactor2;
+  const theoretical2 = irradTilted2 * sys2.kwp;
+
+  // Split total actual kWh proportionally based on theoretical yield per system
+  const combinedTheoretical = parseFloat(result1.theoreticalYield) + theoretical2;
+  const share1 = parseFloat(result1.theoreticalYield) / combinedTheoretical;
+  const share2 = theoretical2 / combinedTheoretical;
+  const kwh1 = Math.round(kwhProduced * share1 * 10) / 10;
+  const kwh2 = Math.round(kwhProduced * share2 * 10) / 10;
+
+  const result2 = buildResult(place, sys2.kwp, kwh2, sys2.orientation, tiltDeg2, orientInfo2, tiltFactor2,
+    {totalQ, count}, station, distanceKm, period, sys2.age);
+  // Rebuild result1 with its proportional share
+  const result1final = buildResult(place, kwp, kwh1, orientation, tiltDeg, orientInfo, tiltFactor,
+    {totalQ, count}, station, distanceKm, period, systemAge);
+
+  // Combined PR: total actual / total theoretical
+  const combinedPR = (kwhProduced / combinedTheoretical) * 100;
+  const {rating, ratingIcon, ratingColor} = getRating(combinedPR);
+  const combinedAdvice = getAdvice(combinedPR, "gecombineerd", Math.round((tiltDeg + tiltDeg2) / 2), Math.round((systemAge + (sys2.age||0)) / 2));
+
+  return {
+    ...result1final,
+    // Override with combined totals
+    kwp: kwp + sys2.kwp,
+    kwhProduced: kwhProduced,
+    theoreticalYield: Math.round(combinedTheoretical),
+    performanceRatio: combinedPR.toFixed(1),
+    rating, ratingIcon, ratingColor,
+    advice: combinedAdvice,
+    // System labels for display
+    orientLabel: `Systeem 1: ${result1.orientArrow} ${result1.orientLabel} ${tiltDeg}° / Systeem 2: ${orientInfo2.arrow} ${orientInfo2.label} ${tiltDeg2}°`,
+    orientArrow: null,
+    tiltFactor: `${result1.tiltFactor} / ${result2.tiltFactor}`,
+    // Per-system breakdown for ResultCard
+    systems: [
+      { label: "Systeem 1", ...result1final },
+      { label: "Systeem 2", ...result2 },
+    ],
+  };
 }
 
 function buildResult(place, kwp, kwhProduced, orientation, tiltDeg, orientInfo, tiltFactor,
@@ -302,9 +354,84 @@ function buildResult(place, kwp, kwhProduced, orientation, tiltDeg, orientInfo, 
   };
 }
 
+// ── KwpInput: single or dual-roof kWp entry ───────────────────────────────────
+function KwpInput({ onSubmit }) {
+  const [dual, setDual] = React.useState(false);
+  const [valA, setValA] = React.useState("");
+  const [valB, setValB] = React.useState("");
+  const [val,  setVal]  = React.useState("");
+  const refA = React.useRef(null);
+  const refS = React.useRef(null);
+
+  React.useEffect(()=>{
+    if (dual) setTimeout(()=>refA.current?.focus(), 50);
+    else setTimeout(()=>refS.current?.focus(), 50);
+  }, [dual]);
+
+  function submit() {
+    if (dual) {
+      const a = parseFloat(valA), b = parseFloat(valB);
+      if (!a || !b || a<=0 || b<=0) return;
+      onSubmit(a + "+" + b);
+    } else {
+      const v = parseFloat(val);
+      if (!v || v<=0) return;
+      onSubmit(String(v));
+    }
+  }
+
+  const inp = {
+    background:"#fff", border:"1px solid #d0d5dd", borderRadius:"8px",
+    padding:"13px 16px", color:"#1a2332", fontSize:"15px",
+    outline:"none", fontFamily:"inherit", width:"100%",
+  };
+  const lbl = { fontSize:"11px", color:"#8a9ab0", letterSpacing:"1px",
+    textTransform:"uppercase", marginBottom:"4px", display:"block" };
+
+  return (
+    <div>
+      {!dual ? (
+        <div style={{display:"flex",gap:"8px"}}>
+          <input ref={refS} type="number" value={val} onChange={e=>setVal(e.target.value)}
+            placeholder="bijv. 6.5" style={{flex:1,...inp}}
+            onKeyDown={e=>{ if(e.key==="Enter"&&val) submit(); }} />
+          <button onClick={submit} style={{background:"#EDB800",border:"none",borderRadius:"12px",
+            padding:"13px 20px",cursor:"pointer",fontSize:"17px",color:"#0a0e1a"}}>→</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+          <div style={{display:"flex",gap:"8px"}}>
+            <div style={{flex:1}}>
+              <span style={lbl}>Dakvlak 1</span>
+              <input ref={refA} type="number" value={valA} onChange={e=>setValA(e.target.value)}
+                placeholder="bijv. 4.0" style={inp}
+                onKeyDown={e=>{ if(e.key==="Enter") submit(); }} />
+            </div>
+            <div style={{flex:1}}>
+              <span style={lbl}>Dakvlak 2</span>
+              <input type="number" value={valB} onChange={e=>setValB(e.target.value)}
+                placeholder="bijv. 2.5" style={inp}
+                onKeyDown={e=>{ if(e.key==="Enter") submit(); }} />
+            </div>
+            <button onClick={submit} style={{background:"#EDB800",border:"none",borderRadius:"12px",
+              padding:"13px 20px",cursor:"pointer",fontSize:"17px",color:"#0a0e1a",alignSelf:"flex-end"}}>→</button>
+          </div>
+        </div>
+      )}
+      <button onClick={()=>setDual(!dual)}
+        style={{marginTop:"8px",background:"none",border:"none",cursor:"pointer",
+          fontSize:"12px",color:"#EDB800",fontWeight:"600",padding:"2px 0",
+          textDecoration:"underline",textDecorationStyle:"dotted"}}>
+        {dual ? "← Één dakvlak" : "+ Twee dakvlakken (oost/west of split)"}
+      </button>
+    </div>
+  );
+}
+
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-function SolarWatson() {
+function SolarCheck() {
   const [step, setStep]                 = useState("home");
   const [answers, setAnswers]           = useState({});
   const [currentInput, setCurrentInput] = useState("");
@@ -316,13 +443,12 @@ function SolarWatson() {
 
   const questions = [
     { key:"place",  q:"In welke plaats ligt het systeem?",                   type:"text",   placeholder:"bijv. Utrecht, Overveen..." },
-    { key:"kwp",    q:"Wat is het vermogen van het systeem in kWp?",         type:"number", placeholder:"bijv. 6.5" },
+    { key:"kwp",    q:"Wat is het totale vermogen van het systeem in kWp?",  type:"kwp",    placeholder:"bijv. 6.5" },
     { key:"period", q:"Over welke periode geef je de productie op?",         type:"choice",
       choices:[
-        {value:"a",label:"a. Deze maand"},
-        {value:"b",label:"b. Vorige volledige maand"},
-        {value:"c",label:"c. Dit jaar tot vandaag"},
-        {value:"d",label:"d. Vorige volledige jaar"},
+        {value:"b",label:"Vorige volledige maand (februari 2026)"},
+        {value:"c",label:"Dit jaar tot februari 2026"},
+        {value:"d",label:"Vorig volledig jaar (2025)"},
       ]
     },
     { key:"orientation", q:"Wat is de oriëntatie van de zonnepanelen?", type:"compass" },
@@ -337,10 +463,13 @@ function SolarWatson() {
         {value:"22",label:"Ouder dan 20 jaar"},
       ]
     },
-    { key:"kwh", q:"Hoeveel stroom in kWh heeft het systeem geproduceerd?", type:"number", placeholder:"bijv. 850" },
+    { key:"kwh", q:"Hoeveel stroom in kWh heeft het systeem totaal geproduceerd? (bij meerdere systemen: de gecombineerde productie)", type:"number", placeholder:"bijv. 850" },
+
+
+
   ];
 
-  const stepOrder = ["place","kwp","period","orientation","tilt","age","kwh"];
+  const stepOrder = ["place","kwp","period","orientation","tilt","age","kwh","orientation2","tilt2","age2"];
   const currentIdx = stepOrder.indexOf(step);
   const currentQuestion = questions[currentIdx] ?? null;
 
@@ -352,8 +481,8 @@ function SolarWatson() {
   function startConversation() {
     setStep("place");
     setMessages([
-      {role:"watson", text:"Goeiedag! Ik ben SolarWatson — ik analyseer of jouw zonnepanelen goed presteren op basis van de meest recente KNMI-stralingsgegevens. Ik stel je een paar korte vragen."},
-      {role:"watson", text:questions[0].q}
+      {role:"check", text:"Goeiedag! Ik ben SolarCheck — ik analyseer of jouw zonnepanelen goed presteren op basis van de meest recente KNMI-stralingsgegevens. Ik stel je een paar korte vragen."},
+      {role:"check", text:questions[0].q}
     ]);
   }
 
@@ -366,27 +495,67 @@ function SolarWatson() {
       ? questions[2].choices.find(c=>c.value===value)?.label
       : key==="orientation"
         ? (ORIENTATION_FACTORS[value]?.arrow + " " + ORIENTATION_FACTORS[value]?.label)
-        : key==="tilt"
+        : key==="tilt" || key==="tilt2"
           ? value + "°"
-        : key==="age"
+        : key==="age" || key==="age2"
           ? (questions.find(q=>q.key==="age")?.choices?.find(c=>c.value===value)?.label || value+" jaar")
-          : value + (key==="kwp"?" kWp":key==="kwh"?" kWh":"");
+        : key==="orientation2"
+          ? (ORIENTATION_FACTORS[value]?.arrow + " " + ORIENTATION_FACTORS[value]?.label)
+        : key==="second"
+          ? (value === "yes" ? "Ja, tweede systeem toevoegen" : "Nee, alleen dit systeem")
+          : key==="kwp"
+          ? (value.includes("+")
+              ? value.split("+").map((v,i)=>"Dakvlak "+(i+1)+": "+v+" kWp").join(" · ")
+              : value + " kWp")
+          : key==="kwh" ? value + " kWh" : value;
     addMsg("user", display);
     setCurrentInput("");
 
-    const idx = stepOrder.indexOf(key);
-    if (idx < stepOrder.length-1) {
-      setTimeout(()=>{ addMsg("watson", questions[idx+1].q); setStep(stepOrder[idx+1]); }, 350);
+    const isDual = (newAnswers.kwp || "").includes("+");
+    const dual2Steps = ["orientation2","tilt2","age2"];
+
+    // Find next step, skipping dual-only steps if single roof
+    function getNextStep(currentKey) {
+      const order = stepOrder;
+      const i = order.indexOf(currentKey);
+      for (let j = i+1; j < order.length; j++) {
+        if (!isDual && dual2Steps.includes(order[j])) continue;
+        return order[j];
+      }
+      return null;
+    }
+
+    const nextStep = getNextStep(key);
+
+    if (nextStep) {
+      const nextQ = questions.find(q => q.key === nextStep);
+      const label = nextStep === "orientation2" ? "Wat is de oriëntatie van dakvlak 2?"
+                  : nextStep === "tilt2"         ? "Wat is de hellingshoek van dakvlak 2?"
+                  : nextStep === "age2"           ? "Hoe oud is dakvlak 2 (in jaren)?"
+                  : nextQ?.q;
+      setTimeout(()=>{ addMsg("check", label); setStep(nextStep); }, 350);
     } else {
       setStep("loading"); setLoading(true);
-      setTimeout(()=>addMsg("watson","Even geduld… ik zoek het dichtstbijzijnde KNMI-station en bereken de prestaties. ☀️"),300);
+      setTimeout(()=>addMsg("check","Even geduld… ik zoek het dichtstbijzijnde KNMI-station en bereken de prestaties. ☀️"),300);
       try {
-        const res = await analyzeLocal(newAnswers.place, parseFloat(newAnswers.kwp), newAnswers.period, parseFloat(newAnswers.kwh), newAnswers.orientation, newAnswers.tilt, parseInt(newAnswers.age) || 0);
+        let kwp1 = parseFloat(newAnswers.kwp);
+        let sys2 = null;
+        if (isDual) {
+          const parts = newAnswers.kwp.split("+");
+          kwp1 = parseFloat(parts[0]);
+          sys2 = {
+            kwp: parseFloat(parts[1]),
+            orientation: newAnswers.orientation2,
+            tilt: newAnswers.tilt2,
+            age: parseInt(newAnswers.age2) || 0,
+          };
+        }
+        const res = await analyzeLocal(newAnswers.place, kwp1, newAnswers.period, parseFloat(newAnswers.kwh), newAnswers.orientation, newAnswers.tilt, parseInt(newAnswers.age) || 0, sys2);
         setResult(res); setLoading(false); setStep("result");
-        setTimeout(()=>addMsg("watson",null,"result"),300);
+        setTimeout(()=>addMsg("check",null,"result"),300);
       } catch(e) {
         setLoading(false); setStep("error");
-        addMsg("watson", `Er ging iets mis: ${e.message}\n\nControleer of de plaatsnaam correct is en probeer opnieuw.`);
+        addMsg("check", `Er ging iets mis: ${e.message}\n\nControleer of de plaatsnaam correct is en probeer opnieuw.`);
       }
     }
   }
@@ -408,11 +577,11 @@ function SolarWatson() {
         borderBottom:"1px solid #e8eaed",background:"rgba(255,255,255,0.97)",
         backdropFilter:"blur(12px)",position:"sticky",top:0,zIndex:100,boxSizing:"border-box" }}>
         <div style={{ display:"flex",alignItems:"center",gap:"10px",flexShrink:0 }}>
-          <SolarWatsonLogo />
+          <SolarCheckLogo />
           <div>
             <div style={{ fontFamily:"'Inter',Arial,sans-serif",fontWeight:"800",fontSize:"16px",
               color:"#1a2332",letterSpacing:"-0.3px",lineHeight:"1.1" }}>
-              ZONHUB <span style={{ color:"#EDB800" }}>|</span> SolarWatson
+              ZONHUB <span style={{ color:"#EDB800" }}>|</span> SolarCheck
             </div>
             <div style={{ fontSize:"10px",color:"#8a9ab0",letterSpacing:"0.5px",marginTop:"1px" }}>
               Zonnepaneel Prestatie Analyse
@@ -448,7 +617,7 @@ function SolarWatson() {
             </svg>
           </div>
           <h1 style={{ fontSize:"clamp(26px,6vw,40px)",color:"#1a2332",margin:"0 0 14px",
-            fontWeight:800,letterSpacing:"-0.5px",textShadow:"none" }}>SolarWatson</h1>
+            fontWeight:800,letterSpacing:"-0.5px",textShadow:"none" }}>SolarCheck</h1>
           <p style={{ color:"#5a6a7a",fontSize:"15px",lineHeight:"1.75",
             margin:"0 0 44px",maxWidth:"420px" }}>
             Ik analyseer de prestaties van uw zonnepanelen op basis van officiële KNMI-stralingsgegevens van het dichtstbijzijnde meetstation.
@@ -475,7 +644,7 @@ function SolarWatson() {
             {messages.map((msg,i)=>(
               <div key={i} style={{ display:"flex",
                 flexDirection:msg.role==="user"?"row-reverse":"row",alignItems:"flex-end",gap:"10px" }}>
-                {msg.role==="watson" && <Avatar/>}
+                {msg.role==="check" && <Avatar/>}
                 {msg.special==="result" && result
                   ? <ResultCard result={result}/>
                   : msg.text ? <Bubble role={msg.role}>{msg.text}</Bubble> : null}
@@ -509,6 +678,8 @@ function SolarWatson() {
                     <ChoiceBtn key={c.value} onClick={()=>handleAnswer(c.value)}>{c.label}</ChoiceBtn>
                   ))}
                 </div>
+              ) : currentQuestion.type==="kwp" ? (
+                <KwpInput onSubmit={(v)=>handleAnswer(v)} />
               ) : (
                 <div style={{ display:"flex",gap:"8px" }}>
                   <input ref={inputRef} type={currentQuestion.type} value={currentInput}
@@ -562,131 +733,331 @@ function SolarWatson() {
 
 
 function EmailSignup({ result }) {
-  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState("button");   // button | form | generating | done
   const [email, setEmail] = useState("");
-  const [marketingOk, setMarketingOk] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [marketingOk, setMarketingOk] = useState(true);
+  const [error, setError] = useState("");
 
-  function handleSubmit() {
-    if (!email.includes("@")) return;
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setSubmitted(true); }, 800);
+  // ── Google Sheets webhook — fill in your Apps Script URL here ──────────────
+  const SHEET_WEBHOOK = "";  // e.g. "https://script.google.com/macros/s/ABC.../exec"
+
+  async function handleSubmit() {
+    if (!email.includes("@")) { setError("Vul een geldig e-mailadres in."); return; }
+    setError("");
+    setPhase("generating");
+
+    // Post to Google Sheets if webhook is configured
+    if (SHEET_WEBHOOK) {
+      try {
+        await fetch(SHEET_WEBHOOK, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email, marketingOk,
+            plaats: result.place,
+            kwp: result.kwp,
+            orientatie: result.orientLabel,
+            pr: result.performanceRatio,
+            periode: result.periodLabel,
+            datum: new Date().toISOString(),
+          }),
+        });
+      } catch(e) { /* fail silently — still generate PDF */ }
+    }
+
+    // Generate PDF
+    generatePDF(result, email);
+    setPhase("done");
   }
 
+  function generatePDF(r, emailAddr) {
+    // ── jsPDF helpers ─────────────────────────────────────────────────────────
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const W = 210, M = 18, CW = W - M * 2;
+    let y = 0;
+
+    // Colours
+    const YELLOW = [237, 184, 0];
+    const DARK   = [26, 35, 50];
+    const GREY   = [90, 106, 122];
+    const LIGHT  = [240, 242, 245];
+    const RED    = [229, 57, 53];
+    const GREEN  = [67, 160, 71];
+    const ratingRgb = r.ratingColor === "#e53935" ? RED
+                    : r.ratingColor === "#43a047" || r.ratingColor === "#00897b" ? GREEN
+                    : [251, 140, 0];
+
+    function hex2rgb(hex) {
+      const h = hex.replace("#","");
+      return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+    }
+
+    function setFont(style="normal", size=10, color=DARK) {
+      doc.setFont("helvetica", style);
+      doc.setFontSize(size);
+      doc.setTextColor(...color);
+    }
+
+    function drawRect(x, yy, w, h, color, radius=2) {
+      doc.setFillColor(...color);
+      doc.roundedRect(x, yy, w, h, radius, radius, "F");
+    }
+
+    function line(yy, color=LIGHT) {
+      doc.setDrawColor(...color);
+      doc.setLineWidth(0.3);
+      doc.line(M, yy, W-M, yy);
+    }
+
+    function checkPage(needed=20) {
+      if (y + needed > 270) { doc.addPage(); y = 20; }
+    }
+
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    drawRect(0, 0, W, 38, DARK, 0);
+    doc.setFillColor(...YELLOW);
+    doc.rect(0, 0, 4, 38, "F");
+    setFont("bold", 18, YELLOW);
+    doc.text("ZONHUB | SolarCheck", M, 15);
+    setFont("normal", 9, [180, 190, 200]);
+    doc.text("Zonnepaneel Prestatie Rapport", M, 22);
+    setFont("normal", 8, [140, 155, 170]);
+    doc.text(`Gegenereerd op ${new Date().toLocaleDateString("nl-NL", {day:"numeric",month:"long",year:"numeric"})}  ·  ${emailAddr}`, M, 30);
+    y = 48;
+
+    // ── PR SCORE BLOCK ────────────────────────────────────────────────────────
+    drawRect(M, y, CW, 32, LIGHT, 3);
+    // PR percentage — large, left side
+    setFont("bold", 30, hex2rgb(r.ratingColor));
+    doc.text(r.performanceRatio + "%", M+5, y+22);
+    // Vertical divider
+    doc.setDrawColor(220, 225, 230);
+    doc.setLineWidth(0.3);
+    doc.line(M+48, y+4, M+48, y+28);
+    // Right side labels
+    setFont("normal", 7, GREY);
+    doc.text("PERFORMANCE RATIO", M+52, y+9);
+    setFont("bold", 12, DARK);
+    doc.text(r.rating, M+52, y+17);
+    setFont("normal", 8, GREY);
+    doc.text(r.periodLabel + "  |  " + r.place, M+52, y+23);
+    doc.text("Station: " + r.station + (r.distanceKm ? " (" + r.distanceKm + " km)" : ""), M+52, y+29);
+    y += 40;
+
+    // ── SYSTEM DETAILS TABLE ──────────────────────────────────────────────────
+    setFont("bold", 10, DARK);
+    doc.text("Systeemgegevens", M, y); y += 6;
+    line(y); y += 4;
+
+    const rows = [
+      ["Vermogen", `${r.kwp} kWp`],
+      ["Oriëntatie", r.orientArrow ? `${r.orientArrow} ${r.orientLabel}` : r.orientLabel],
+      ["Hellingshoek", `${r.tilt}°  (tiltfactor ${r.tiltFactor})`],
+      ["Systeemleeftijd", r.systemAge === 0 ? "Nieuw (< 1 jaar)" : `~${r.systemAge} jaar`],
+      ["Instraling horizontaal", `${r.irradianceHorizKwhM2} kWh/m²`],
+      ["Instraling op paneel", `${r.irradianceTiltedKwhM2} kWh/m²  (${r.daysWithData} dagen)`],
+      ["Theoretische opbrengst", `${r.theoreticalYield} kWh`],
+      ["Werkelijke productie", `${r.kwhProduced} kWh`],
+    ];
+    rows.forEach(([label, val], i) => {
+      if (i % 2 === 0) drawRect(M, y-3, CW, 7, [247,248,250], 1);
+      setFont("normal", 9, GREY);
+      doc.text(label, M+3, y+2);
+      setFont("bold", 9, DARK);
+      doc.text(val, M+80, y+2);
+      y += 7;
+    });
+    y += 6;
+
+    // ── WHAT IS PR ────────────────────────────────────────────────────────────
+    checkPage(50);
+    drawRect(M, y, CW, 6, YELLOW, 2);
+    setFont("bold", 10, DARK);
+    doc.text("Wat is de Performance Ratio?", M+3, y+4.5); y += 10;
+
+    setFont("normal", 9, DARK);
+    const prExplain = doc.splitTextToSize(
+      "De Performance Ratio (PR) vergelijkt de werkelijke stroomopbrengst van je zonnepanelen met de theoretisch maximale opbrengst op basis van de gemeten zonnestraling op jouw locatie. Een PR van 80% betekent dat je systeem 80% presteert van wat theoretisch mogelijk is onder de gemeten omstandigheden.",
+      CW);
+    doc.text(prExplain, M, y); y += prExplain.length * 5 + 3;
+
+    setFont("normal", 9, DARK);
+    const formula = "Formule:  PR = Werkelijke productie (kWh)  ÷  (Instraling op paneel (kWh/m²)  ×  Vermogen (kWp))";
+    drawRect(M, y, CW, 9, [230, 240, 255], 2);
+    setFont("bold", 9, [30, 80, 180]);
+    doc.text(formula, M+3, y+6); y += 15;
+
+    setFont("bold", 9, DARK);
+    doc.text("Referentiewaarden (SMA-norm):", M, y); y += 5;
+    const refs = [
+      ["< 75%",    "(!!) Lager dan verwacht — inspectie aanbevolen",   RED],
+      ["75–80%",  "(~)  Onder gemiddeld — mogelijke verbeterpunten",  [251,140,0]],
+      ["80–90%",  "(v)  Goed — normaal voor een goed functionerend systeem",  GREEN],
+      ["90–95%",  "(**)  Zeer goed",                                   [0,137,123]],
+      ["> 95%",   "(!!) Ongewoon hoog — controleer invoer",           [142,36,170]],
+    ];
+    refs.forEach(([range, label, col]) => {
+      checkPage(8);
+      setFont("bold", 8, col);
+      doc.text(range, M+3, y);
+      setFont("normal", 8, DARK);
+      doc.text(label, M+22, y);
+      y += 5.5;
+    });
+    y += 4;
+
+    // ── INTERPRETATION ────────────────────────────────────────────────────────
+    checkPage(60);
+    drawRect(M, y, CW, 6, YELLOW, 2);
+    setFont("bold", 10, DARK);
+    doc.text("Hoe interpreteer je de uitkomst?", M+3, y+4.5); y += 10;
+
+    const interp = [
+      ["Schaduwwerking", "Schaduw is de meest voorkomende oorzaak van een lage PR. Zelfs gedeeltelijke schaduw van een schoorsteen, boom of dakkapel op één paneel kan de output van een hele string verlagen. Controleer vooral in de ochtend en avond of vroege voorjaar/late herfst of er sprake is van schaduwval op de panelen."],
+      ["Vervuiling & vogelpoep", "Vuil op de panelen verlaagt de lichtopvang. Bij een hellingshoek onder 15° spoelt regen minder effectief schoon. Overweeg jaarlijks professioneel reinigen."],
+      ["Temperatuureffect", "Zonnepanelen presteren beter bij lagere temperaturen. Warme zomerdagen verlagen tijdelijk de PR — dit is normaal en geen teken van een defect."],
+      ["Omvormer", "Een haperende omvormer is vaak de oorzaak van een plotse PR-daling. Controleer de omvormer-app of het display op foutmeldingen."],
+      ["Panelveroudering", r.systemAge >= 5 ? `Bij een systeem van ~${r.systemAge} jaar is een degradatie van ~${Math.min(r.systemAge*0.5,20).toFixed(0)}% normaal (industriestandaard ~0.5%/jaar voor mono- en polykristallijn). Dit is verdisconteerd in de beoordeling.` : "Nieuwe systemen presteren doorgaans het best. Degradatie neemt geleidelijk toe (~0.5%/jaar)."],
+    ];
+
+    interp.forEach(([title, text]) => {
+      checkPage(25);
+      setFont("bold", 9, DARK);
+      doc.text("- " + title, M, y); y += 5;
+      setFont("normal", 9, GREY);
+      const wrapped = doc.splitTextToSize(text, CW-5);
+      doc.text(wrapped, M+4, y); y += wrapped.length * 4.8 + 4;
+    });
+    y += 2;
+
+    // ── HOW TO IMPROVE ────────────────────────────────────────────────────────
+    checkPage(55);
+    drawRect(M, y, CW, 6, YELLOW, 2);
+    setFont("bold", 10, DARK);
+    doc.text("Hoe verbeter je de PR?", M+3, y+4.5); y += 10;
+
+    const improvements = [
+      ["Schaduw reduceren", "Snoeien of verwijderen van bomen/struiken die schaduw werpen. Overweeg micro-omvormers of optimizers als schaduw niet volledig te vermijden is — deze beperken het cascade-effect op de rest van de string."],
+      ["Panelen reinigen", "Professioneel reinigen kan de opbrengst met 3–5% verhogen, vooral bij een lage hellingshoek of in stedelijk/agrarisch gebied."],
+      ["Omvormer controleren", "Laat de omvormer jaarlijks controleren door een installateur. Een onderpresterende omvormer is relatief goedkoop te vervangen en heeft direct effect op de PR."],
+      ["Hellingshoek optimaliseren", `De optimale hellingshoek op Nederlandse breedtegraad (~52°N) is 35–38°. Uw systeem staat op ${r.tilt}°.${Math.abs(r.tilt-36)>8 ? " Een aanpassing richting 35° kan de jaaropbrengst verbeteren." : " Dit is dicht bij optimaal."}`],
+      ["Uitbreiden met optimizers", "Power-optimizers per paneel elimineren het effect van schaduw en vervuiling op de totale string en verhogen de PR typisch met 5–15% in niet-ideale situaties."],
+    ];
+
+    improvements.forEach(([title, text]) => {
+      checkPage(25);
+      setFont("bold", 9, DARK);
+      doc.text("- " + title, M, y); y += 5;
+      setFont("normal", 9, GREY);
+      const wrapped = doc.splitTextToSize(text, CW-5);
+      doc.text(wrapped, M+4, y); y += wrapped.length * 4.8 + 4;
+    });
+    y += 2;
+
+    // ── DISCLAIMER ────────────────────────────────────────────────────────────
+    checkPage(35);
+    drawRect(M, y, CW, 6, [240,240,240], 2);
+    setFont("bold", 9, GREY);
+    doc.text("Disclaimer", M+3, y+4.5); y += 10;
+    setFont("normal", 8, GREY);
+    const disclaimer = doc.splitTextToSize(
+      "Dit rapport is gegenereerd op basis van schattingen en historische KNMI-stralingsgegevens. De berekende Performance Ratio is een indicatie en geen gecertificeerde meting. Stralingsdata is afkomstig van het dichtstbijzijnde KNMI-weerstation en kan afwijken van de werkelijke instraling op uw locatie door lokale factoren zoals bewolking, horizonafscherming en microklimaat. De tiltfactor is berekend op basis van een vereenvoudigd model (SMA-methode) en houdt geen rekening met reflectie, diffuse straling of albedo. Raadpleeg een gecertificeerde installateur voor een professionele prestatiemeting. Zonhub aanvaardt geen aansprakelijkheid voor beslissingen genomen op basis van dit rapport.",
+      CW);
+    doc.text(disclaimer, M, y); y += disclaimer.length * 4.5 + 6;
+
+    // ── FOOTER ────────────────────────────────────────────────────────────────
+    const pageCount = doc.getNumberOfPages();
+    for (let p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      drawRect(0, 287, W, 10, DARK, 0);
+      setFont("normal", 7, [140,155,170]);
+      doc.text("ZONHUB | SolarCheck  ·  zonhub.com/check  ·  Zonnepaneel Prestatie Analyse", M, 293);
+      doc.text(`Pagina ${p} van ${pageCount}`, W-M, 293, {align:"right"});
+    }
+
+    doc.save(`SolarCheck_Rapport_${r.place.replace(/\s+/g,"_")}_${new Date().toISOString().slice(0,10)}.pdf`);
+  }
+
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+  if (phase === "button") return (
+    <button onClick={()=>setPhase("form")}
+      style={{ background:"#1a2332", color:"#EDB800", border:"none",
+        padding:"12px 24px", borderRadius:"30px", cursor:"pointer",
+        fontSize:"13px", fontFamily:"inherit", fontWeight:"700",
+        letterSpacing:"0.5px", display:"flex", alignItems:"center", gap:"8px",
+        boxShadow:"0 2px 8px rgba(0,0,0,0.15)" }}>
+      ↓ Download uitgebreid rapport (PDF)
+    </button>
+  );
+
+  if (phase === "generating") return (
+    <div style={{ textAlign:"center", padding:"16px", color:"#5a6a7a", fontSize:"13px" }}>
+      <div style={{ fontSize:"24px", marginBottom:"8px" }}>📄</div>
+      PDF wordt gegenereerd…
+    </div>
+  );
+
+  if (phase === "done") return (
+    <div style={{ textAlign:"center", padding:"16px" }}>
+      <div style={{ fontSize:"28px", marginBottom:"8px" }}>✅</div>
+      <div style={{ fontWeight:"700", fontSize:"14px", color:"#1a2332", marginBottom:"6px" }}>
+        Rapport gedownload!
+      </div>
+      <div style={{ fontSize:"12px", color:"#5a6a7a" }}>
+        Check je downloads map voor het PDF-rapport.
+      </div>
+    </div>
+  );
+
+  // phase === "form"
   return (
-    <>
-      <button onClick={()=>setOpen(true)}
-        style={{ background:"#fff", color:"#1a2332", border:"1px solid #e8eaed",
-          padding:"11px 22px", borderRadius:"30px", cursor:"pointer",
-          fontSize:"13px", fontFamily:"inherit", letterSpacing:"1px",
-          display:"flex", alignItems:"center", gap:"8px",
-          boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        ✉ Ontvang kwartaalrapport
+    <div style={{ background:"#fff", border:"1px solid #e8eaed", borderRadius:"16px",
+      padding:"22px", maxWidth:"400px", boxShadow:"0 4px 20px rgba(0,0,0,0.08)" }}>
+      <div style={{ fontWeight:"800", fontSize:"15px", color:"#1a2332", marginBottom:"4px" }}>
+        ↓ Download uitgebreid rapport
+      </div>
+      <div style={{ fontSize:"12px", color:"#5a6a7a", marginBottom:"18px", lineHeight:"1.5" }}>
+        Vul je e-mailadres in om het PDF-rapport te downloaden. Het rapport bevat een uitleg
+        van de berekening, interpretatie van je score, tips voor verbetering en een disclaimer.
+      </div>
+
+      <label style={{ display:"block", fontSize:"11px", fontWeight:"700",
+        color:"#1a2332", marginBottom:"5px", letterSpacing:"0.5px" }}>E-MAILADRES</label>
+      <input type="email" value={email} onChange={e=>{ setEmail(e.target.value); setError(""); }}
+        onKeyDown={e=>e.key==="Enter" && handleSubmit()}
+        placeholder="jouw@emailadres.nl" autoFocus
+        style={{ width:"100%", padding:"11px 14px", borderRadius:"8px",
+          border:`1.5px solid ${error ? "#e53935" : "#e8eaed"}`,
+          fontSize:"14px", fontFamily:"inherit", outline:"none",
+          boxSizing:"border-box", marginBottom: error ? "4px" : "14px" }}/>
+      {error && <div style={{ fontSize:"11px", color:"#e53935", marginBottom:"10px" }}>{error}</div>}
+
+      <label style={{ display:"flex", gap:"10px", alignItems:"flex-start",
+        cursor:"pointer", marginBottom:"18px" }}
+        onClick={()=>setMarketingOk(v=>!v)}>
+        <input type="checkbox" checked={marketingOk} readOnly
+          style={{ marginTop:"3px", accentColor:"#EDB800", flexShrink:0 }}/>
+        <span style={{ fontSize:"11px", color:"#5a6a7a", lineHeight:"1.5" }}>
+          Ja, ik wil nieuws en aanbiedingen van Zonhub ontvangen. (optioneel — vink uit om af te melden)
+        </span>
+      </label>
+
+      <button onClick={handleSubmit}
+        style={{ width:"100%", background:"#EDB800", color:"#1a2332",
+          border:"none", borderRadius:"8px", padding:"13px",
+          fontSize:"14px", fontWeight:"700", cursor:"pointer",
+          fontFamily:"inherit" }}>
+        Rapport downloaden
       </button>
-
-      {open && (
-        <div style={{ position:"fixed", inset:0, zIndex:300, display:"flex",
-          alignItems:"center", justifyContent:"center", padding:"20px",
-          background:"rgba(26,35,50,0.5)", backdropFilter:"blur(4px)" }}
-          onClick={e=>{ if(e.target===e.currentTarget) setOpen(false); }}>
-          <div style={{ background:"#fff", borderRadius:"16px", maxWidth:"420px", width:"100%",
-            boxShadow:"0 16px 48px rgba(0,0,0,0.2)", overflow:"hidden" }}>
-            <div style={{ background:"#1a2332", padding:"18px 22px", display:"flex",
-              alignItems:"center", justifyContent:"space-between" }}>
-              <div>
-                <div style={{ color:"#EDB800", fontWeight:"800", fontSize:"15px" }}>
-                  Blijf op de hoogte
-                </div>
-                <div style={{ color:"rgba(255,255,255,0.45)", fontSize:"12px", marginTop:"2px" }}>
-                  Maximaal 4x per jaar een rapport in je inbox
-                </div>
-              </div>
-              <button onClick={()=>setOpen(false)}
-                style={{ background:"rgba(255,255,255,0.1)", border:"none", color:"white",
-                  width:"30px", height:"30px", borderRadius:"50%", cursor:"pointer",
-                  fontSize:"16px", fontWeight:"700" }}>x</button>
-            </div>
-
-            <div style={{ padding:"22px" }}>
-              {submitted ? (
-                <div style={{ textAlign:"center", padding:"16px 0" }}>
-                  <div style={{ fontSize:"36px", marginBottom:"12px" }}>check</div>
-                  <div style={{ fontWeight:"700", fontSize:"16px", color:"#1a2332", marginBottom:"8px" }}>
-                    Je bent aangemeld!
-                  </div>
-                  <div style={{ fontSize:"13px", color:"#5a6a7a", lineHeight:"1.6" }}>
-                    We sturen je maximaal 4x per jaar een rapport met de verwachte
-                    min-max opbrengst van je systeem op basis van de KNMI-instraling
-                    van de vorige maand, het vorige kwartaal en het lopende jaar.
-                  </div>
-                  <button onClick={()=>setOpen(false)}
-                    style={{ marginTop:"18px", background:"#EDB800", border:"none",
-                      borderRadius:"8px", padding:"11px 28px", fontWeight:"700",
-                      cursor:"pointer", fontFamily:"inherit", fontSize:"14px", color:"#1a2332" }}>
-                    Sluiten
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize:"13px", color:"#5a6a7a", lineHeight:"1.6", marginBottom:"18px" }}>
-                    Elk kwartaal sturen we je een overzicht met de <strong>min-max verwachte opbrengst</strong> van
-                    je {result.kwp} kWp systeem ({result.orientLabel}, {result.tilt} graden) op basis van de
-                    werkelijke KNMI-instraling van de <em>vorige maand</em>, het <em>vorige kwartaal</em> en
-                    het <em>lopende jaar</em>.
-                  </div>
-                  <label style={{ display:"block", fontSize:"12px", fontWeight:"600",
-                    color:"#1a2332", marginBottom:"6px" }}>E-mailadres</label>
-                  <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
-                    onKeyDown={e=>e.key==="Enter" && handleSubmit()}
-                    placeholder="jouw@emailadres.nl"
-                    style={{ width:"100%", padding:"11px 14px", borderRadius:"8px",
-                      border:"1.5px solid #e8eaed", fontSize:"14px", fontFamily:"inherit",
-                      outline:"none", boxSizing:"border-box", marginBottom:"14px" }}/>
-
-                  <label style={{ display:"flex", gap:"10px", alignItems:"flex-start",
-                    marginBottom:"10px" }}>
-                    <input type="checkbox" defaultChecked readOnly
-                      style={{ marginTop:"3px", accentColor:"#EDB800", flexShrink:0 }}/>
-                    <span style={{ fontSize:"12px", color:"#5a6a7a", lineHeight:"1.5" }}>
-                      Ik geef toestemming voor het ontvangen van maximaal 4 kwartaalrapporten per jaar
-                      met mijn verwachte zonnepaneelopbrengst. Afmelden via de mail.
-                    </span>
-                  </label>
-
-                  <label style={{ display:"flex", gap:"10px", alignItems:"flex-start",
-                    cursor:"pointer", marginBottom:"18px" }}
-                    onClick={()=>setMarketingOk(v=>!v)}>
-                    <input type="checkbox" checked={marketingOk} readOnly
-                      style={{ marginTop:"3px", accentColor:"#EDB800", flexShrink:0 }}/>
-                    <span style={{ fontSize:"12px", color:"#5a6a7a", lineHeight:"1.5" }}>
-                      Ik ontvang ook graag nieuws en aanbiedingen van Zonhub. (optioneel)
-                    </span>
-                  </label>
-
-                  <button onClick={handleSubmit} disabled={!email.includes("@") || loading}
-                    style={{ width:"100%",
-                      background: email.includes("@") ? "#EDB800" : "#f0f2f5",
-                      color: email.includes("@") ? "#1a2332" : "#9aabb8",
-                      border:"none", borderRadius:"8px", padding:"13px",
-                      fontSize:"14px", fontWeight:"700",
-                      cursor: email.includes("@") ? "pointer" : "default",
-                      fontFamily:"inherit", transition:"all 0.2s" }}>
-                    {loading ? "Aanmelden..." : "Aanmelden voor kwartaalrapport"}
-                  </button>
-
-                  <p style={{ fontSize:"11px", color:"#b0bec5", marginTop:"10px", textAlign:"center" }}>
-                    Zonhub verwerkt je gegevens conform de AVG. Geen spam, geen doorverkoop.
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      <p style={{ fontSize:"11px", color:"#b0bec5", marginTop:"10px", textAlign:"center" }}>
+        Zonhub verwerkt je gegevens conform de AVG. Geen spam, geen doorverkoop.
+      </p>
+    </div>
   );
 }
+
 
 function ShareButton({ result }) {
   const [open, setOpen] = useState(false);
@@ -738,7 +1109,7 @@ function ShareModal({ result, onClose }) {
     ctx.fillStyle = "#1a2332";
     ctx.fillText("ZONHUB", 36, 56);
     ctx.fillStyle = "#EDB800";
-    ctx.fillText(" | SolarWatson", 136, 56);
+    ctx.fillText(" | SolarCheck", 136, 56);
     ctx.fillStyle = "#e8eaed";
     ctx.fillRect(36, 70, 498, 1);
     ctx.font = "bold 138px Arial";
@@ -806,7 +1177,7 @@ function ShareModal({ result, onClose }) {
     ctx.fillStyle = "#EDB800";
     ctx.fillRect(0, H - 50, W, 2);
     ctx.font = "13px Arial"; ctx.fillStyle = "#b0bec5";
-    ctx.fillText("Berekend met officiele KNMI-stralingsgegevens  -  zonhub.com/solarwatson", 36, H - 17);
+    ctx.fillText("Berekend met officiele KNMI-stralingsgegevens  -  zonhub.com/solarcheck", 36, H - 17);
 
     setImgUrl(canvas.toDataURL("image/png"));
   }, []);
@@ -828,14 +1199,14 @@ function ShareModal({ result, onClose }) {
   function downloadImage() {
     const a = document.createElement("a");
     a.href = imgUrl;
-    a.download = `solarwatson-${result.place.replace(/\s+/g,"-").toLowerCase()}.png`;
+    a.download = `solarcheck-${result.place.replace(/\s+/g,"-").toLowerCase()}.png`;
     a.click();
   }
 
   function copyText() {
     const pr = parseFloat(result.performanceRatio);
     const text =
-`☀️ SolarWatson — Zonnepaneel analyse
+`☀️ SolarCheck — Zonnepaneel analyse
 
 📍 ${result.place} · ${result.kwp} kWp · ${result.orientArrow} ${result.orientLabel} ${result.tilt}°
 📅 ${result.periodLabel}
@@ -846,7 +1217,7 @@ Performance Ratio: ${result.performanceRatio}% — ${result.rating} ${result.rat
 🔌 Werkelijk:   ${result.kwhProduced} kWh
 ☀️ Instraling:  ${result.irradianceTiltedKwhM2} kWh/m²
 
-Bereken zelf: zonhub.com/solarwatson`;
+Bereken zelf: zonhub.com/solarcheck`;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
@@ -857,8 +1228,8 @@ Bereken zelf: zonhub.com/solarwatson`;
 
   function nativeShare() {
     navigator.share({
-      title: "SolarWatson — mijn zonnepanelen analyse",
-      text: `Mijn zonnepanelen scoren ${result.performanceRatio}% PR (${result.rating}). Bereken die van jou: zonhub.com/solarwatson`,
+      title: "SolarCheck — mijn zonnepanelen analyse",
+      text: `Mijn zonnepanelen scoren ${result.performanceRatio}% PR (${result.rating}). Bereken die van jou: zonhub.com/solarcheck`,
     }).catch(()=>{});
   }
 
@@ -970,7 +1341,7 @@ function Avatar() {
   );
 }
 
-function SolarWatsonLogo() {
+function SolarCheckLogo() {
   return (
     <svg width="40" height="40" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
       {[0,45,90,135,180,225,270,315].map(angle => {
@@ -1216,7 +1587,7 @@ function PRInfoButton() {
               <p style={{ margin:"0 0 8px", fontWeight:"700", color:"#1a2332" }}>Richtwaarden:</p>
               <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
                 {[
-                  ["< 75%",  "Niet okay",  "#e53935", "Mogelijk defect, schaduw of vervuiling"],
+                  ["< 75%",  "Niet oké",  "#e53935", "Mogelijk defect, schaduw of vervuiling"],
                   ["75-80%", "Redelijk",   "#fb8c00", "Onder de norm, check de installatie"],
                   ["80-90%", "Goed",       "#43a047", "Normaal voor een goed functionerend systeem"],
                   ["90-95%", "Zeer goed",  "#00897b", "Uitstekende prestatie"],
@@ -1253,10 +1624,12 @@ function ResultCard({result}) {
     ["📡 KNMI-station", result.distanceKm ? `${result.station} (${result.distanceKm} km)` : result.station],
     ["📅 Periode", result.periodLabel],
     ["🧭 Oriëntatie", result.orientArrow ? `${result.orientArrow} ${result.orientLabel}` : (result.orientLabel || "—")],
-    ["📐 Hellingshoek", `${result.tilt}° (tiltfactor ${result.tiltFactor})`],
-    ["🗓 Systeemleeftijd", result.systemAge === 0 ? "Nieuw (< 1 jaar)" : `~${result.systemAge} jaar`],
-    ["☀️ Instraling horizontaal", `${result.irradianceHorizKwhM2} kWh/m²`],
-    ["☀️ Instraling op paneel", `${result.irradianceTiltedKwhM2} kWh/m² (${result.daysWithData} dagen)`],
+    ...(result.systems ? [] : [
+      ["📐 Hellingshoek", `${result.tilt}° (tiltfactor ${result.tiltFactor})`],
+      ["🗓 Systeemleeftijd", result.systemAge === 0 ? "Nieuw (< 1 jaar)" : `~${result.systemAge} jaar`],
+      ["☀️ Instraling horizontaal", `${result.irradianceHorizKwhM2} kWh/m²`],
+      ["☀️ Instraling op paneel", `${result.irradianceTiltedKwhM2} kWh/m²`],
+    ]),
     ["⚡ Theoretische opbrengst", `${Math.round(result.theoreticalYield)} kWh`],
     ["🔌 Werkelijke productie", `${result.kwhProduced} kWh`],
   ];
@@ -1292,17 +1665,31 @@ function ResultCard({result}) {
             background:"linear-gradient(90deg,#e53935 0%,#fb8c00 62%,#43a047 67%,#00897b 77%,#1565c0 86%)",
             borderRadius:"4px",transition:"width 1s ease" }}/>
         </div>
-        <div style={{ position:"relative",height:"15px",marginTop:"3px" }}>
-          {[0,75,80,90,95,100].map(p=>(
+        <div style={{ position:"relative",height:"18px",marginTop:"3px" }}>
+          {[0,75,80,90,95].map(p=>(
             <span key={p} style={{
               position:"absolute", left:markerPos(p),
               transform: p===0 ? "none" : "translateX(-50%)",
-              fontSize:"10px",
-              color: Math.abs(pr-p) < 3 ? "#1a2332" : "#9aabb8",
-              fontWeight: Math.abs(pr-p) < 3 ? "700" : "400"
+              fontSize:"9px",
+              color: Math.abs(pr-p) < 4 ? "#1a2332" : "#9aabb8",
+              fontWeight: Math.abs(pr-p) < 4 ? "700" : "400",
+              whiteSpace:"nowrap"
             }}>{p}%</span>
           ))}
-          <span style={{ position:"absolute",right:0,fontSize:"10px",color:"#9aabb8" }}>110%+</span>
+          <span style={{ position:"absolute",right:0,fontSize:"9px",color:"#9aabb8",whiteSpace:"nowrap" }}>110%+</span>
+          {pr >= 87 && (
+            <span style={{
+              position:"absolute",
+              left:`${Math.min(pr, 108) / BAR_MAX * 100}%`,
+              transform:"translateX(-50%)",
+              fontSize:"10px", fontWeight:"800",
+              color:result.ratingColor,
+              top:"-2px",
+              whiteSpace:"nowrap",
+              background:"white",
+              padding:"0 2px",
+            }}>{Number(result.performanceRatio).toFixed(1)}%</span>
+          )}
         </div>
       </div>
 
@@ -1313,6 +1700,29 @@ function ResultCard({result}) {
           <span style={{ fontSize:"13px",color:"#2d3a48",textAlign:"right" }}>{val}</span>
         </div>
       ))}
+
+      {result.systems && (
+        <div style={{ marginBottom:"14px" }}>
+          <div style={{ fontSize:"11px",color:"#8a9ab0",letterSpacing:"1.5px",
+            textTransform:"uppercase",marginBottom:"8px" }}>Uitsplitsing per systeem</div>
+          {result.systems.map((sys, idx) => (
+            <div key={idx} style={{ background:"#f7f8fa", borderRadius:"10px",
+              padding:"12px 14px", marginBottom:"8px",
+              borderLeft:`3px solid ${idx===0?"#EDB800":"#3a6bc4"}` }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px" }}>
+                <span style={{ fontWeight:"700",fontSize:"13px",color:"#1a2332" }}>{sys.label}</span>
+                <span style={{ fontWeight:"800",fontSize:"16px",color:sys.ratingColor }}>{sys.performanceRatio}%</span>
+              </div>
+              <div style={{ fontSize:"12px",color:"#5a6a7a",display:"grid",gridTemplateColumns:"1fr 1fr",gap:"3px" }}>
+                <span>{sys.orientArrow} {sys.orientLabel} · {sys.tilt}°</span>
+                <span style={{textAlign:"right"}}>{sys.kwp} kWp</span>
+                <span>Theoretisch: {Math.round(sys.theoreticalYield)} kWh</span>
+                <span style={{textAlign:"right"}}>Werkelijk: {sys.kwhProduced} kWh</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ marginTop:"14px",padding:"11px 13px",background:`${result.ratingColor}11`,
         border:`1px solid ${result.ratingColor}33`,borderRadius:"10px",fontSize:"13px",
@@ -1328,9 +1738,8 @@ function ResultCard({result}) {
   );
 }
 
-
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<SolarWatson />);
+    root.render(<SolarCheck />);
   </script>
 </body>
 </html>
