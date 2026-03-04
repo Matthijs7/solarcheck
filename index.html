@@ -1,4 +1,26 @@
-import { useState, useEffect, useRef } from "react";
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Solar Check — Zonhub Prestatie Check</title>
+  <meta name="description" content="Bereken de Performance Ratio van je zonnepanelen met officiële KNMI-stralingsgegevens."/>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #f0f2f5; }
+    #root { height: 100%; }
+    body { overflow-x: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
 
 // ── Period helpers ────────────────────────────────────────────────────────────
 
@@ -409,7 +431,7 @@ function KwpInput({ onSubmit }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function SolarCheck() {
+function SolarCheck() {
   const [step, setStep]                 = useState("home");
   const [answers, setAnswers]           = useState({});
   const [currentInput, setCurrentInput] = useState("");
@@ -1715,3 +1737,10 @@ function ResultCard({result}) {
     </div>
   );
 }
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<SolarCheck />);
+  </script>
+</body>
+</html>
