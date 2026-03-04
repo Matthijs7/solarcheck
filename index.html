@@ -420,7 +420,7 @@ function KwpInput({ onSubmit }) {
       )}
       <button onClick={()=>setDual(!dual)}
         style={{marginTop:"8px",background:"none",border:"none",cursor:"pointer",
-          fontSize:"12px",color:"#FFD900",fontWeight:"600",padding:"2px 0",
+          fontSize:"12px",color:"#0C65BB",fontWeight:"600",padding:"2px 0",
           textDecoration:"underline",textDecorationStyle:"dotted"}}>
         {dual ? "← Één dakvlak" : "+ Twee dakvlakken (oost/west of split)"}
       </button>
@@ -464,14 +464,22 @@ function SolarCheck() {
       ]
     },
     { key:"kwh", q:"Hoeveel stroom in kWh heeft het systeem totaal geproduceerd? (bij meerdere systemen: de gecombineerde productie)", type:"number", placeholder:"bijv. 850" },
-
-
-
+    { key:"orientation2", q:"Wat is de ori\u00ebntatie van dakvlak 2?", type:"compass" },
+    { key:"tilt2",        q:"Wat is de hellingshoek van dakvlak 2?", type:"tilt" },
+    { key:"age2",         q:"Hoe oud is dakvlak 2 (in jaren)?", type:"choice",
+      choices:[
+        {value:"0", label:"Nieuw (< 1 jaar)"},
+        {value:"2", label:"1\u20133 jaar"},
+        {value:"5", label:"4\u20137 jaar"},
+        {value:"10",label:"8\u201312 jaar"},
+        {value:"15",label:"13\u201320 jaar"},
+        {value:"22",label:"Ouder dan 20 jaar"},
+      ]
+    },
   ];
 
   const stepOrder = ["place","kwp","period","orientation","tilt","age","kwh","orientation2","tilt2","age2"];
-  const currentIdx = stepOrder.indexOf(step);
-  const currentQuestion = questions[currentIdx] ?? null;
+  const currentQuestion = questions.find(q => q.key === step) ?? null;
 
   useEffect(()=>{ if(chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; },[messages,loading]);
   useEffect(()=>{ if(inputRef.current && (currentQuestion?.type==="text" || currentQuestion?.type==="number")) inputRef.current?.focus(); },[step]);
@@ -704,7 +712,6 @@ function SolarCheck() {
               {step==="result" && result && (
                 <>
                   <EmailSignup result={result}/>
-                  <ShareButton result={result}/>
                 </>
               )}
               <button onClick={reset} style={{ background:"linear-gradient(135deg,rgba(255,200,50,0.15),rgba(255,140,0,0.1))",
@@ -729,9 +736,6 @@ function SolarCheck() {
   );
 }
 
-// ── Share ─────────────────────────────────────────────────────────────────────
-
-
 function EmailSignup({ result }) {
   const [phase, setPhase] = useState("button");   // button | form | generating | done
   const [email, setEmail] = useState("");
@@ -739,7 +743,7 @@ function EmailSignup({ result }) {
   const [error, setError] = useState("");
 
   // ── Google Sheets webhook — fill in your Apps Script URL here ──────────────
-  const SHEET_WEBHOOK = "";  // e.g. "https://script.google.com/macros/s/ABC.../exec"
+  const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzFbqoU2zWsMqslsug86qjdMBmBkwEB2zCZ9ea0BLfO4wmLaE4XldFmo1d2E2QCk0Zm/exec";
 
   async function handleSubmit() {
     if (!email.includes("@")) { setError("Vul een geldig e-mailadres in."); return; }
@@ -1058,265 +1062,6 @@ function EmailSignup({ result }) {
   );
 }
 
-
-function ShareButton({ result }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button onClick={()=>setOpen(true)}
-        style={{ background:"#1a2332", color:"#FFD900", border:"none",
-          padding:"11px 22px", borderRadius:"30px", cursor:"pointer",
-          fontSize:"13px", fontFamily:"inherit", letterSpacing:"1px",
-          display:"flex", alignItems:"center", gap:"8px",
-          boxShadow:"0 2px 12px rgba(26,35,50,0.2)" }}>
-        <span style={{fontSize:"15px"}}>↗</span> Deel resultaat
-      </button>
-      {open && <ShareModal result={result} onClose={()=>setOpen(false)}/>}
-    </>
-  );
-}
-
-function ShareModal({ result, onClose }) {
-  const canvasRef = useRef(null);
-  const [copied, setCopied] = useState(false);
-  const [imgUrl, setImgUrl] = useState(null);
-  const pr = parseFloat(result.performanceRatio);
-
-  // Rating colors
-  const ratingColor = result.ratingColor;
-
-  // Draw share card on canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const W = 1200, H = 630;
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d");
-
-    // Achtergrond: wit Zonhub-branding
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, W, H);
-    const glow = ctx.createRadialGradient(W*0.88, H*0.1, 0, W*0.88, H*0.1, 440);
-    glow.addColorStop(0, "rgba(255,217,0,0.08)");
-    glow.addColorStop(1, "transparent");
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#f7f8fa";
-    ctx.fillRect(0, 0, 568, H);
-    ctx.fillStyle = "#FFD900";
-    ctx.fillRect(0, 0, 5, H);
-    ctx.font = "bold 27px Arial";
-    ctx.fillStyle = "#1a2332";
-    ctx.fillText("ZONHUB", 36, 56);
-    ctx.fillStyle = "#FFD900";
-    ctx.fillText(" | SolarCheck", 136, 56);
-    ctx.fillStyle = "#e8eaed";
-    ctx.fillRect(36, 70, 498, 1);
-    ctx.font = "bold 138px Arial";
-    ctx.fillStyle = ratingColor;
-    ctx.fillText(pr.toFixed(1) + "%", 36, 292);
-    ctx.font = "bold 17px Arial";
-    ctx.fillStyle = "#8a9ab0";
-    ctx.fillText("PERFORMANCE RATIO", 40, 328);
-    const badgeW = 228, badgeH = 46, badgeX = 38, badgeY = 352;
-    ctx.fillStyle = ratingColor + "18";
-    ctx.strokeStyle = ratingColor + "55";
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 23);
-    ctx.fill(); ctx.stroke();
-    ctx.font = "bold 20px Arial";
-    ctx.fillStyle = ratingColor;
-    ctx.fillText(result.ratingIcon + "  " + result.rating, badgeX + 18, badgeY + 30);
-    const barX = 38, barY = 438, barW2 = 488, barH2 = 12, MAX = 110;
-    ctx.fillStyle = "#e8eaed";
-    roundRect(ctx, barX, barY, barW2, barH2, 6); ctx.fill();
-    const fillW = Math.min(pr, MAX) / MAX * barW2;
-    const grad = ctx.createLinearGradient(barX, 0, barX + barW2, 0);
-    grad.addColorStop(0,    "#e53935");
-    grad.addColorStop(0.62, "#fb8c00");
-    grad.addColorStop(0.67, "#43a047");
-    grad.addColorStop(0.82, "#00897b");
-    grad.addColorStop(0.90, "#1565c0");
-    ctx.fillStyle = grad;
-    roundRect(ctx, barX, barY, fillW, barH2, 6); ctx.fill();
-    [75,80,90,95,100].forEach(p => {
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.fillRect(barX + (p/MAX)*barW2, barY, 1.5, barH2);
-    });
-    ctx.font = "12px Arial"; ctx.fillStyle = "#b0bec5";
-    [0,75,80,90,95,100].forEach(p => {
-      const mx = barX + (p/MAX)*barW2;
-      ctx.fillText(p + "%", mx - (p > 0 ? 10 : 0), barY + barH2 + 18);
-    });
-    ctx.fillStyle = "#e8eaed";
-    ctx.fillRect(578, 86, 1.5, H - 136);
-    const rx = 616;
-    const details = [
-      ["Locatie",           result.place],
-      ["Systeemvermogen",   result.kwp + " kWp"],
-      ["Orientatie",        result.orientArrow + " " + result.orientLabel + " - " + result.tilt + "deg"],
-      ["KNMI-station",      result.station],
-      ["Instraling paneel", result.irradianceTiltedKwhM2 + " kWh/m2"],
-      ["Werkelijk",         result.kwhProduced + " kWh"],
-      ["Theoretisch",       result.theoreticalYield + " kWh"],
-      ["Periode",           result.periodLabel],
-    ];
-    ctx.font = "bold 27px Arial"; ctx.fillStyle = "#1a2332";
-    ctx.fillText("Systeemanalyse", rx, 134);
-    ctx.fillStyle = "#e8eaed";
-    ctx.fillRect(rx, 148, 532, 1.5);
-    details.forEach(([label, val], i) => {
-      const y = 190 + i * 52;
-      ctx.font = "12px Arial"; ctx.fillStyle = "#8a9ab0";
-      ctx.fillText(label.toUpperCase(), rx, y);
-      ctx.font = "bold 17px Arial"; ctx.fillStyle = "#1a2332";
-      ctx.fillText(val, rx, y + 22);
-    });
-    ctx.fillStyle = "#f0f2f5";
-    ctx.fillRect(0, H - 50, W, 50);
-    ctx.fillStyle = "#FFD900";
-    ctx.fillRect(0, H - 50, W, 2);
-    ctx.font = "13px Arial"; ctx.fillStyle = "#b0bec5";
-    ctx.fillText("Berekend met officiele KNMI-stralingsgegevens  -  zonhub.com/solarcheck", 36, H - 17);
-
-    setImgUrl(canvas.toDataURL("image/png"));
-  }, []);
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.lineTo(x+w-r, y);
-    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
-    ctx.lineTo(x+w, y+h-r);
-    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
-    ctx.lineTo(x+r, y+h);
-    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
-    ctx.lineTo(x, y+r);
-    ctx.quadraticCurveTo(x, y, x+r, y);
-    ctx.closePath();
-  }
-
-  function downloadImage() {
-    const a = document.createElement("a");
-    a.href = imgUrl;
-    a.download = `solarcheck-${result.place.replace(/\s+/g,"-").toLowerCase()}.png`;
-    a.click();
-  }
-
-  function copyText() {
-    const pr = parseFloat(result.performanceRatio);
-    const text =
-`☀️ SolarCheck — Zonnepaneel analyse
-
-📍 ${result.place} · ${result.kwp} kWp · ${result.orientArrow} ${result.orientLabel} ${result.tilt}°
-📅 ${result.periodLabel}
-
-Performance Ratio: ${result.performanceRatio}% — ${result.rating} ${result.ratingIcon}
-
-⚡ Theoretisch: ${result.theoreticalYield} kWh
-🔌 Werkelijk:   ${result.kwhProduced} kWh
-☀️ Instraling:  ${result.irradianceTiltedKwhM2} kWh/m²
-
-Bereken zelf: zonhub.com/solarcheck`;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    });
-  }
-
-  const canShare = typeof navigator.share === "function";
-
-  function nativeShare() {
-    navigator.share({
-      title: "SolarCheck — mijn zonnepanelen analyse",
-      text: `Mijn zonnepanelen scoren ${result.performanceRatio}% PR (${result.rating}). Bereken die van jou: zonhub.com/solarcheck`,
-    }).catch(()=>{});
-  }
-
-  return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(10,14,26,0.85)",
-      zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",
-      padding:"20px", backdropFilter:"blur(6px)" }}
-      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
-
-      <div style={{ background:"#ffffff",borderRadius:"20px",maxWidth:"560px",width:"100%",
-        boxShadow:"0 24px 80px rgba(0,0,0,0.4)", overflow:"hidden" }}>
-
-        {/* Header */}
-        <div style={{ background:"#1a2332",padding:"20px 24px",display:"flex",
-          alignItems:"center",justifyContent:"space-between" }}>
-          <div>
-            <div style={{ color:"#FFD900",fontWeight:"800",fontSize:"15px",letterSpacing:"-0.3px" }}>
-              Deel jouw resultaat
-            </div>
-            <div style={{ color:"rgba(255,255,255,0.45)",fontSize:"12px",marginTop:"2px" }}>
-              Laat anderen zien hoe jouw systeem presteert
-            </div>
-          </div>
-          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.1)",border:"none",
-            color:"white",width:"32px",height:"32px",borderRadius:"50%",
-            cursor:"pointer",fontSize:"16px" }}>×</button>
-        </div>
-
-        {/* Preview */}
-        <div style={{ padding:"20px 24px 0" }}>
-          <div style={{ fontSize:"11px",color:"#9aabb8",letterSpacing:"1px",
-            textTransform:"uppercase",marginBottom:"10px" }}>Voorvertoning</div>
-          {imgUrl
-            ? <img src={imgUrl} alt="share card"
-                style={{ width:"100%",borderRadius:"10px",
-                  boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }}/>
-            : <div style={{ height:"220px",background:"#f0f2f5",borderRadius:"10px",
-                display:"flex",alignItems:"center",justifyContent:"center",
-                color:"#9aabb8",fontSize:"13px" }}>Kaart laden…</div>
-          }
-        </div>
-
-        {/* Hidden canvas */}
-        <canvas ref={canvasRef} style={{ display:"none" }}/>
-
-        {/* Actions */}
-        <div style={{ padding:"20px 24px 24px",display:"flex",flexDirection:"column",gap:"10px" }}>
-          <button onClick={downloadImage} disabled={!imgUrl}
-            style={{ background:"#FFD900",color:"#1a2332",border:"none",
-              borderRadius:"10px",padding:"13px",fontSize:"14px",fontWeight:"700",
-              cursor:"pointer",fontFamily:"inherit",
-              display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",
-              opacity: imgUrl ? 1 : 0.5 }}>
-            <span>⬇</span> Download afbeelding
-          </button>
-
-          <div style={{ display:"flex",gap:"8px" }}>
-            <button onClick={copyText}
-              style={{ flex:1,background:copied?"#f0faf4":"#f4f6f9",
-                color:copied?"#2e7d32":"#1a2332",border:`1px solid ${copied?"#81c784":"#e8eaed"}`,
-                borderRadius:"10px",padding:"11px",fontSize:"13px",fontWeight:"600",
-                cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s",
-                display:"flex",alignItems:"center",justifyContent:"center",gap:"6px" }}>
-              {copied ? "✓ Gekopieerd!" : "📋 Kopieer tekst"}
-            </button>
-
-            {canShare && (
-              <button onClick={nativeShare}
-                style={{ flex:1,background:"#f4f6f9",color:"#1a2332",
-                  border:"1px solid #e8eaed",borderRadius:"10px",padding:"11px",
-                  fontSize:"13px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit",
-                  display:"flex",alignItems:"center",justifyContent:"center",gap:"6px" }}>
-                ↗ Delen via…
-              </button>
-            )}
-          </div>
-
-          <div style={{ fontSize:"11px",color:"#b0bec5",textAlign:"center",paddingTop:"4px" }}>
-            De afbeelding bevat jouw locatie en systeemgegevens
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
 
 function Avatar() {
   return (
@@ -1737,7 +1482,6 @@ function ResultCard({result}) {
     </div>
   );
 }
-
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<SolarCheck />);
