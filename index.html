@@ -743,7 +743,7 @@ function EmailSignup({ result }) {
   const [error, setError] = useState("");
 
   // ── Google Sheets webhook — fill in your Apps Script URL here ──────────────
-  const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzFbqoU2zWsMqslsug86qjdMBmBkwEB2zCZ9ea0BLfO4wmLaE4XldFmo1d2E2QCk0Zm/exec";
+  const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbz9YxEyQAMKB4K4XXYAGSzGvRwpCHb1zGM7KGbmZLLRnBIiQEyRZkySG6gsMveGx7l-/exec";
 
   async function handleSubmit() {
     if (!email.includes("@")) { setError("Vul een geldig e-mailadres in."); return; }
