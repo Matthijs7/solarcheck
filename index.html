@@ -753,19 +753,19 @@ function EmailSignup({ result }) {
     // Post to Google Sheets if webhook is configured
     if (SHEET_WEBHOOK) {
       try {
-        await fetch(SHEET_WEBHOOK, {
-          method: "POST",
-          mode: "no-cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email, marketingOk,
+        const params = new URLSearchParams({
+            email,
+            marketingOk: marketingOk ? "Ja" : "Nee",
             plaats: result.place,
             kwp: result.kwp,
             orientatie: result.orientLabel,
             pr: result.performanceRatio,
             periode: result.periodLabel,
             datum: new Date().toISOString(),
-          }),
+          });
+        await fetch(SHEET_WEBHOOK + "?" + params.toString(), {
+          method: "GET",
+          mode: "no-cors",
         });
       } catch(e) { /* fail silently — still generate PDF */ }
     }
