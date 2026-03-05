@@ -1165,10 +1165,13 @@ function EmailSignup({ result }) {
                     : [251,140,0];
     function sf(bold,size,col=DARK){ doc.setFont("helvetica",bold?"bold":"normal"); doc.setFontSize(size); doc.setTextColor(...col); }
     function box(x,yy,w,h,col,r=2){ doc.setFillColor(...col); doc.roundedRect(x,yy,w,h,r,r,"F"); }
-    function hline(yy){ doc.setDrawColor(...LIGHT); doc.setLineWidth(0.3); doc.line(M,yy,W-M,yy); }
+    function hline(yy,col=LIGHT){ doc.setDrawColor(...col); doc.setLineWidth(0.3); doc.line(M,yy,W-M,yy); }
+    function sectionHeader(title){ checkPage(14); sf(true,8,GREY); doc.text(title,M,y); y+=5; hline(y); y+=6; }
     function checkPage(need=20){ if(y+need>272){ doc.addPage(); y=22; } }
 
-    // ── Header
+    // ─── PAGINA 1: Header + PR Score + Systeemgegevens ───────────────────────
+
+    // Header
     box(0,0,W,36,DARK,0);
     doc.setFillColor(...YELLOW); doc.rect(0,0,4,36,"F");
     sf(true,16,YELLOW); doc.text("SolarCheck",M,14);
@@ -1178,78 +1181,178 @@ function EmailSignup({ result }) {
       M, 29);
     y=46;
 
-    // ── PR Score
-    checkPage(40);
-    box(M,y,CW,36,LIGHT,3);
-    doc.setFillColor(...ratingRgb); doc.rect(M,y,4,36,"F");
-    sf(true,30,ratingRgb); doc.text(parseFloat(r.performanceRatio).toFixed(1)+"%", W-M-2, y+23, {align:"right"});
-    sf(true,13,ratingRgb); doc.text(r.rating, M+10, y+14);
-    sf(false,9,GREY); doc.text("Performance Ratio", M+10, y+22);
-    sf(false,8,GREY); doc.text(r.periodLabel+"  ·  "+r.place, M+10, y+30);
-    y+=44;
+    // PR Score block
+    box(M,y,CW,40,LIGHT,3);
+    doc.setFillColor(...ratingRgb); doc.rect(M,y,4,40,"F");
+    sf(true,32,ratingRgb); doc.text(parseFloat(r.performanceRatio).toFixed(1)+"%", W-M-2, y+26, {align:"right"});
+    sf(true,14,ratingRgb); doc.text(r.ratingIcon+" "+r.rating, M+10, y+14);
+    sf(false,9,GREY); doc.text("Performance Ratio (PR)", M+10, y+23);
+    sf(false,8,GREY); doc.text(r.periodLabel, M+10, y+31);
+    sf(false,8,GREY); doc.text(r.place, M+10, y+38);
+    y+=50;
 
-    // ── Systeem info tabel
-    checkPage(10); sf(true,8,GREY); doc.text("SYSTEEMGEGEVENS",M,y); y+=5; hline(y); y+=5;
+    // PR Balk visualisatie
+    checkPage(18);
+    sf(true,8,GREY); doc.text("PR SCHAAL",M,y); y+=4;
+    const barW=CW, barH=6, barX=M;
+    // Gradient zones als rechthoeken
+    const zones=[[0,75,[229,57,53]],[75,80,[251,140,0]],[80,90,[67,160,71]],[90,95,[0,137,123]],[95,100,[12,101,187]]];
+    zones.forEach(([from,to,col])=>{
+      doc.setFillColor(...col);
+      doc.rect(barX+(from/100)*barW, y, ((to-from)/100)*barW, barH,"F");
+    });
+    // Pijltje indicator
+    const prClamped=Math.min(parseFloat(r.performanceRatio),100);
+    const arrowX=barX+(prClamped/100)*barW;
+    doc.setFillColor(...ratingRgb);
+    doc.triangle(arrowX-3,y+barH+5, arrowX+3,y+barH+5, arrowX,y+barH+1,"F");
+    sf(true,8,ratingRgb); doc.text(r.performanceRatio+"%",arrowX,y+barH+10,{align:"center"});
+    // Labels
+    sf(false,7,GREY);
+    ["0%","80%","100%"].forEach(lbl=>{
+      const pct=parseInt(lbl)/100;
+      doc.text(lbl, barX+pct*barW, y-1, {align: lbl==="0%" ? "left" : lbl==="100%" ? "right" : "center"});
+    });
+    y+=22;
 
+    // Systeemgegevens
+    sectionHeader("SYSTEEMGEGEVENS");
     const rows = r.systems ? [] : [
       ["Locatie", r.place],
       ["KNMI-station", r.distanceKm ? r.station+" ("+r.distanceKm+" km)" : r.station],
       ["Periode", r.periodLabel],
       ["Orientatie", r.orientArrow ? r.orientArrow+" "+r.orientLabel : (r.orientLabel||"-")],
-      ["Hellingshoek", r.tilt+(String.fromCharCode(176))+" (factor "+r.tiltFactor+")"],
-      ["Systeemleeftijd", r.systemAge===0 ? "Nieuw" : "~"+r.systemAge+" jaar"],
+      ["Hellingshoek", r.tilt+String.fromCharCode(176)+" (tiltfactor "+r.tiltFactor+")"],
+      ["Systeemleeftijd", r.systemAge===0 ? "Nieuw (< 1 jaar)" : "~"+r.systemAge+" jaar"],
       ["Instraling horizontaal", r.irradianceHorizKwhM2+" kWh/m"+String.fromCharCode(178)],
       ["Instraling op paneel", r.irradianceTiltedKwhM2+" kWh/m"+String.fromCharCode(178)],
-      ["Theoretisch", Math.round(r.theoreticalYield)+" kWh"],
-      ["Werkelijk", r.kwhProduced+" kWh"],
+      ["Theoretische opbrengst", Math.round(r.theoreticalYield)+" kWh"],
+      ["Werkelijke productie", r.kwhProduced+" kWh"],
     ];
 
     if(r.systems) {
       r.systems.forEach((s,i)=>{
-        checkPage(28);
-        const sc=i===0?YELLOW:([12,101,187]);
-        box(M,y,CW,24,LIGHT,2);
-        doc.setFillColor(...sc); doc.rect(M,y,3,24,"F");
+        checkPage(30);
+        const sc=i===0?YELLOW:[12,101,187];
+        box(M,y,CW,26,LIGHT,2);
+        doc.setFillColor(...sc); doc.rect(M,y,3,26,"F");
         sf(true,11,DARK); doc.text(s.label,M+7,y+9);
-        sf(true,15,ratingRgb); doc.text(s.performanceRatio+"%",W-M-2,y+11,{align:"right"});
-        sf(false,8,GREY); doc.text(s.orientArrow+" "+s.orientLabel+" · "+s.tilt+(String.fromCharCode(176))+" · "+s.kwp+" kWp",M+7,y+17);
-        doc.text("Theor: "+Math.round(s.theoreticalYield)+" kWh  ·  Wkl: "+s.kwhProduced+" kWh",M+7,y+22);
-        y+=28;
+        sf(true,14,ratingRgb); doc.text(s.performanceRatio+"%",W-M-2,y+12,{align:"right"});
+        sf(false,8,GREY); doc.text(s.orientArrow+" "+s.orientLabel+" - "+s.tilt+String.fromCharCode(176)+" - "+s.kwp+" kWp",M+7,y+17);
+        doc.text("Theor: "+Math.round(s.theoreticalYield)+" kWh  |  Wkl: "+s.kwhProduced+" kWh",M+7,y+23);
+        y+=30;
       });
     }
 
     rows.forEach(([label,val])=>{
-      checkPage(8);
+      checkPage(9);
       sf(false,9,GREY); doc.text(label,M,y);
-      sf(true,9,DARK);  doc.text(String(val),W-M,y,{align:"right"});
+      sf(true,9,DARK); doc.text(String(val),W-M,y,{align:"right"});
       y+=7; hline(y-2);
+    });
+    y+=8;
+
+    // ─── PAGINA 2: Uitleg + Advies ───────────────────────────────────────────
+
+    // Wat is PR?
+    sectionHeader("WAT IS DE PERFORMANCE RATIO?");
+    sf(false,9,DARK);
+    const prUitleg=[
+      "De Performance Ratio (PR) is de meest gebruikte maatstaf om de prestatie van een",
+      "zonnepanelensysteem te beoordelen. Het geeft aan welk percentage van de theoretisch",
+      "maximaal mogelijke energie daadwerkelijk wordt geproduceerd.",
+      "",
+      "Formule:  PR = Werkelijke productie (kWh) / (Instraling op paneel (kWh/m2) x kWp) x 100%",
+      "",
+      "De instraling wordt gecorrigeerd voor de hellingshoek en orientatie van de panelen,",
+      "zodat de PR een eerlijke vergelijking maakt ongeacht de opstelling.",
+    ];
+    prUitleg.forEach(line=>{
+      checkPage(7);
+      if(line==="") { y+=3; return; }
+      if(line.startsWith("Formule:")) { sf(true,9,DARK); doc.text(line,M,y); sf(false,9,DARK); }
+      else doc.text(line,M,y);
+      y+=6;
+    });
+    y+=4;
+
+    // PR Normen tabel
+    sectionHeader("PR NORMEN (SMA TECHNICAL INFORMATION)");
+    const normen=[
+      ["< 75%","Niet oké","#e53935","Mogelijk defect, schaduw of vervuiling"],
+      ["75 - 80%","Matig","#fb8c00","Onder verwachting, onderzoek aanbevolen"],
+      ["80 - 90%","Goed","#43a047","Normaal voor Nederlandse omstandigheden"],
+      ["90 - 95%","Zeer goed","#00897b","Boven gemiddeld, goed onderhouden systeem"],
+      ["> 95%","Uitstekend","#0C65BB","Controleer invoer — of topinstallatie"],
+    ];
+    normen.forEach(([range,label,color,desc])=>{
+      checkPage(10);
+      const rgb=color==="#e53935"?[229,57,53]:color==="#fb8c00"?[251,140,0]:color==="#43a047"?[67,160,71]:color==="#00897b"?[0,137,123]:[12,101,187];
+      box(M,y-4,3,8,rgb,1);
+      sf(true,9,DARK); doc.text(range,M+6,y);
+      sf(false,9,rgb); doc.text(label,M+32,y);
+      sf(false,8,GREY); doc.text(desc,M+60,y);
+      y+=8; hline(y-2);
     });
     y+=6;
 
-    // ── Wat is PR?
-    checkPage(40); sf(true,8,GREY); doc.text("WAT IS DE PERFORMANCE RATIO?",M,y); y+=5; hline(y); y+=5;
-    sf(false,9,DARK);
-    const prTxt="De Performance Ratio (PR) geeft aan hoe efficiënt je zonnepanelensysteem werkt ten opzichte van de theoretisch maximale opbrengst op basis van de zonnestraling. PR = Werkelijke productie / (Instraling x kWp) x 100%. Een PR van 80% of hoger is goed voor Nederland.";
-    const prLines=doc.splitTextToSize(prTxt,CW);
-    checkPage(prLines.length*5.5+8); doc.text(prLines,M,y); y+=prLines.length*5.5+8;
+    // Advies
+    checkPage(20);
+    box(M,y,CW,7,ratingRgb,2);
+    sf(true,9,[255,255,255]); doc.text("INTERPRETATIE & ADVIES",M+5,y+5);
+    y+=11;
+    box(M,y,CW,4,[...ratingRgb.map(v=>Math.min(255,v+180))],0);
+    y+=8;
+    const advLines=doc.splitTextToSize(r.advice, CW-6);
+    checkPage(advLines.length*6+10);
+    box(M,y-3,CW,advLines.length*6+8,LIGHT,2);
+    sf(false,9,DARK); doc.text(advLines,M+4,y+3);
+    y+=advLines.length*6+12;
 
-    // ── Advies
-    checkPage(36); sf(true,8,[255,255,255]);
-    box(M,y,CW,6,ratingRgb,2); doc.text("ADVIES",M+4,y+4.5); y+=10;
-    const advLines=doc.splitTextToSize(r.advice,CW-8);
-    checkPage(advLines.length*5.5+10);
-    box(M,y,CW,advLines.length*5.5+10,LIGHT,2);
-    sf(false,9,DARK); doc.text(advLines,M+5,y+6);
-    y+=advLines.length*5.5+16;
+    // Verbeterstips
+    checkPage(14);
+    sectionHeader("ALGEMENE VERBETERSTIPS");
+    const tips=[
+      "Reinig panelen minimaal 1x per jaar, bij voorkeur in het voorjaar",
+      "Controleer of bomen, schoorsteen of dakkapel schaduw veroorzaken",
+      "Laat de omvormer jaarlijks controleren op efficientieproblemen",
+      "Monitor de productie maandelijks en vergelijk met vorig jaar",
+      "Controleer bekabeling en aansluitingen op corrosie of loszitten",
+    ];
+    tips.forEach(tip=>{
+      checkPage(8);
+      doc.setFillColor(...ratingRgb); doc.circle(M+1.5, y-1.5, 1.2, "F");
+      sf(false,9,DARK); doc.text(tip,M+6,y);
+      y+=7;
+    });
+    y+=6;
 
-    // ── Footer op elke pagina
+    // ─── DISCLAIMER ──────────────────────────────────────────────────────────
+    checkPage(30);
+    box(M,y,CW,1,[220,225,230],0); y+=5;
+    sf(true,7,GREY); doc.text("DISCLAIMER",M,y); y+=5;
+    const disclaimer="Dit rapport is gegenereerd op basis van KNMI-stralingsgegevens van het dichtstbijzijnde meetstation en de door u ingevoerde systeemgegevens. De berekeningen zijn indicatief. Afwijkingen kunnen optreden door lokale omstandigheden zoals schaduw, temperatuur, inverterrendement en kabelverliezen. Zonhub aanvaardt geen aansprakelijkheid voor beslissingen genomen op basis van dit rapport. Voor een nauwkeurige analyse adviseert Zonhub een inspectie door een erkend installateur.";
+    const disclaimerLines=doc.splitTextToSize(disclaimer,CW);
+    sf(false,7,[140,155,170]); doc.text(disclaimerLines,M,y);
+    y+=disclaimerLines.length*4.5+6;
+
+    // Zonhub CTA
+    checkPage(22);
+    box(M,y,CW,18,DARK,3);
+    doc.setFillColor(...YELLOW); doc.rect(M,y,3,18,"F");
+    sf(true,10,YELLOW); doc.text("Meer weten over uw zonnesysteem?",M+8,y+8);
+    sf(false,8,[180,190,200]); doc.text("Zonhub helpt u bij het optimaliseren en monitoren van uw installatie.",M+8,y+14);
+    sf(true,8,YELLOW); doc.text("zonhub.com",W-M-2,y+11,{align:"right"});
+    y+=24;
+
+    // ─── FOOTER op elke pagina ────────────────────────────────────────────────
     const np=doc.getNumberOfPages();
     for(let p=1;p<=np;p++){
       doc.setPage(p);
-      box(0,285,W,12,DARK,0);
+      box(0,284,W,13,DARK,0);
       sf(false,7,[130,145,160]);
-      doc.text("SolarCheck by Zonhub  ·  zonhub.com/check  ·  Berekend met KNMI-stralingsgegevens",M,292);
-      doc.text("Pagina "+p+" van "+np, W-M, 292, {align:"right"});
+      doc.text("SolarCheck by Zonhub  ·  zonhub.com/check  ·  Berekend met officiele KNMI-stralingsgegevens",M,291);
+      doc.text("Pagina "+p+" van "+np, W-M, 291, {align:"right"});
     }
 
     doc.save("SolarCheck_"+r.place.replace(/\s+/g,"_")+"_"+new Date().toISOString().slice(0,10)+".pdf");
